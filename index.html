@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>1v1 LOL Test</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --panel: rgba(15, 23, 42, 0.8);
+        --line: rgba(148, 163, 184, 0.25);
+        --blue: #38bdf8;
+        --cyan: #67e8f9;
+        --green: #34d399;
+        --red: #f87171;
+        --yellow: #facc15;
+        --white: #e2e8f0;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: radial-gradient(circle at top, #1f2937, #0b1120 55%, #020817);
+        color: var(--white);
+        font-family: Arial, Helvetica, sans-serif;
+        overflow: hidden;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+      }
+
+      .shell {
+        position: relative;
+        width: min(96vw, 1100px);
+        aspect-ratio: 16 / 9;
+        border: 2px solid var(--line);
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.7);
+        box-shadow: 0 25px 80px rgba(2, 6, 23, 0.9);
+        overflow: hidden;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(180deg, #10213d, #0b1e35 40%, #0b1324);
+      }
+
+      .hud {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .health-wrap {
+        position: absolute;
+        top: 14px;
+        left: 18px;
+        width: 260px;
+        padding: 8px 10px 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.65);
+      }
+
+      .bar-label {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #cbd5e1;
+        margin-bottom: 6px;
+      }
+
+      .bar {
+        position: relative;
+        height: 14px;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.2);
+        overflow: hidden;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+      }
+
+      .bar-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--green), #bbf7d0);
+        box-shadow: 0 0 18px rgba(52, 211, 153, 0.7);
+      }
+
+      .bar-fill.enemy {
+        background: linear-gradient(90deg, var(--red), #fecaca);
+        box-shadow: 0 0 18px rgba(248, 113, 113, 0.7);
+      }
+
+      .enemy-health {
+        position: absolute;
+        top: 14px;
+        right: 18px;
+        width: 260px;
+      }
+
+      .center-message {
+        position: absolute;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        padding: 10px 18px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.7);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #e0f2fe;
+      }
+
+      .build-indicator {
+        position: absolute;
+        right: 18px;
+        bottom: 18px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(103, 232, 249, 0.5);
+        background: rgba(14, 116, 144, 0.18);
+        color: var(--cyan);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <canvas id="gameCanvas" width="1100" height="620"></canvas>
+
+      <div class="hud">
+        <div class="health-wrap">
+          <div class="bar-label">YOU</div>
+          <div class="bar"><div id="playerBar" class="bar-fill"></div></div>
+        </div>
+
+        <div class="health-wrap enemy-health">
+          <div class="bar-label">BOT</div>
+          <div class="bar"><div id="enemyBar" class="bar-fill enemy"></div></div>
+        </div>
+
+        <div id="centerMessage" class="center-message">CLICK TO SHOOT • Q = BUILD • R = RESET</div>
+        <div id="buildIndicator" class="build-indicator">BUILD MODE OFF</div>
+      </div>
+    </div>
+
+    <script>
+      const canvas = document.getElementById('gameCanvas');
+      const ctx = canvas.getContext('2d');
+      const playerBar = document.getElementById('playerBar');
+      const enemyBar = document.getElementById('enemyBar');
+      const centerMessage = document.getElementById('centerMessage');
+      const buildIndicator = document.getElementById('buildIndicator');
+
+      const state = {
+        mouseX: canvas.width / 2,
+        mouseY: canvas.height / 2,
+        keys: {},
+        buildMode: false,
+        winner: null,
+        lastTime: 0,
+        gameOver: false
+      };
+
+      const config = {
+        playerSpeed: 3.3,
+        bulletSpeed: 8,
+        botSpeed: 2.5,
+        wallSize: 28,
+        maxWalls: 11
+      };
+
+      function resetGame() {
+        state.winner = null;
+        state.gameOver = false;
+        centerMessage.textContent = 'CLICK TO SHOOT • Q = BUILD • R = RESET';
+        state.buildMode = false;
+        buildIndicator.textContent = 'BUILD MODE OFF';
+
+        player.x = 160;
+        player.y = canvas.height / 2;
+        player.health = 100;
+        player.angle = 0;
+
+        enemy.x = canvas.width - 180;
+        enemy.y = canvas.height / 2;
+        enemy.health = 100;
+        enemy.angle = Math.PI;
+
+        bullets.length = 0;
+        walls.length = 0;
+
+        const room = [
+          [canvas.width / 2 - 180, canvas.height / 2 - 120, 120, 30],
+          [canvas.width / 2 + 60, canvas.height / 2 + 110, 120, 30],
+          [canvas.width / 2 - 140, canvas.height / 2 + 90, 120, 30],
+          [canvas.width / 2 + 60, canvas.height / 2 - 150, 120, 30],
+          [canvas.width / 2 - 60, canvas.height / 2 - 30, 30, 90],
+          [canvas.width / 2 + 30, canvas.height / 2 - 30, 30, 90]
+        ];
+
+        room.forEach(([x, y, w, h]) => walls.push({ x, y, w, h }));
+      }
+
+      const player = {
+        x: 160,
+        y: canvas.height / 2,
+        r: 16,
+        speed: config.playerSpeed,
+        health: 100,
+        angle: 0,
+        fireCooldown: 0,
+        damage: 22
+      };
+
+      const enemy = {
+        x: canvas.width - 180,
+        y: canvas.height / 2,
+        r: 16,
+        speed: config.botSpeed,
+        health: 100,
+        angle: Math.PI,
+        fireCooldown: 0,
+        damage: 18
+      };
+
+      const bullets = [];
+      const walls = [];
+
+      function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+      }
+
+      function distance(a, b) {
+        return Math.hypot(a.x - b.x, a.y - b.y);
+      }
+
+      function angleBetween(a, b) {
+        return Math.atan2(b.y - a.y, b.x - a.x);
+      }
+
+      function collidesCircleRect(circle, rect) {
+        const closestX = clamp(circle.x, rect.x, rect.x + rect.w);
+        const closestY = clamp(circle.y, rect.y, rect.y + rect.h);
+        const dx = circle.x - closestX;
+        const dy = circle.y - closestY;
+        return dx * dx + dy * dy < circle.r * circle.r;
+      }
+
+      function moveEntity(entity, dx, dy) {
+        const nextX = entity.x + dx;
+        const nextY = entity.y + dy;
+
+        const test = { x: nextX, y: entity.y, r: entity.r };
+        let hitX = false;
+        for (const wall of walls) {
+          if (collidesCircleRect(test, wall)) {
+            hitX = true;
+            break;
+          }
+        }
+        if (!hitX) entity.x = nextX;
+
+        const testY = { x: entity.x, y: nextY, r: entity.r };
+        let hitY = false;
+        for (const wall of walls) {
+          if (collidesCircleRect(testY, wall)) {
+            hitY = true;
+            break;
+          }
+        }
+        if (!hitY) entity.y = nextY;
+
+        entity.x = clamp(entity.x, entity.r, canvas.width - entity.r);
+        entity.y = clamp(entity.y, entity.r, canvas.height - entity.r);
+      }
+
+      function shoot(from, target, owner) {
+        const angle = angleBetween(from, target);
+        bullets.push({
+          x: from.x + Math.cos(angle) * (from.r + 6),
+          y: from.y + Math.sin(angle) * (from.r + 6),
+          vx: Math.cos(angle) * config.bulletSpeed,
+          vy: Math.sin(angle) * config.bulletSpeed,
+          r: 4,
+          owner,
+          ttl: 90
+        });
+      }
+
+      function placeWall() {
+        if (walls.length >= config.maxWalls) {
+          centerMessage.textContent = 'MAX WALLS REACHED';
+          return;
+        }
+
+        const gridSize = config.wallSize;
+        const snapX = Math.round((state.mouseX - gridSize / 2) / gridSize) * gridSize;
+        const snapY = Math.round((state.mouseY - gridSize / 2) / gridSize) * gridSize;
+
+        const wall = { x: clampedWallPos(snapX), y: clampedWallPos(snapY), w: gridSize, h: gridSize };
+        const colliding = [player, enemy].some((entity) => {
+          return collidesCircleRect({ x: entity.x, y: entity.y, r: entity.r + 2 }, wall);
+        });
+
+        if (!colliding) {
+          walls.push(wall);
+          centerMessage.textContent = 'WALL PLACED';
+        } else {
+          centerMessage.textContent = 'CAN\'T PLACE THERE';
+        }
+      }
+
+      function clampedWallPos(value) {
+        const min = 10;
+        const max = canvas.width - config.wallSize - 10;
+        return clamp(value, min, max);
+      }
+
+      function updatePlayer() {
+        const dx = (state.keys['d'] || state.keys['arrowright'] ? 1 : 0) - (state.keys['a'] || state.keys['arrowleft'] ? 1 : 0);
+        const dy = (state.keys['s'] || state.keys['arrowdown'] ? 1 : 0) - (state.keys['w'] || state.keys['arrowup'] ? 1 : 0);
+
+        const length = Math.hypot(dx, dy) || 1;
+        const moveX = (dx / length) * player.speed;
+        const moveY = (dy / length) * player.speed;
+
+        moveEntity(player, moveX, moveY);
+        player.angle = angleBetween(player, { x: state.mouseX, y: state.mouseY });
+
+        if (player.fireCooldown > 0) player.fireCooldown -= 1;
+      }
+
+      function updateEnemy() {
+        if (state.gameOver) return;
+
+        enemy.angle = angleBetween(enemy, player);
+
+        const targetDistance = distance(enemy, player);
+        const avoidX = 0;
+        const avoidY = 0;
+
+        let dx = player.x - enemy.x;
+        let dy = player.y - enemy.y;
+        const dist = Math.hypot(dx, dy) || 1;
+
+        dx /= dist;
+        dy /= dist;
+
+        const shouldChase = targetDistance > 90;
+        const shouldBackAway = targetDistance < 120;
+
+        let moveX = 0;
+        let moveY = 0;
+
+        if (shouldChase) {
+          moveX = dx * enemy.speed;
+          moveY = dy * enemy.speed;
+        } else if (shouldBackAway) {
+          moveX = -dx * enemy.speed * 0.8;
+          moveY = -dy * enemy.speed * 0.8;
+        }
+
+        const jitterX = Math.sin((performance.now() * 0.0025) + enemy.x) * 0.2;
+        const jitterY = Math.cos((performance.now() * 0.0028) + enemy.y) * 0.2;
+
+        moveEntity(enemy, moveX + jitterX, moveY + jitterY);
+
+        if (enemy.fireCooldown > 0) enemy.fireCooldown -= 1;
+
+        const aimDist = distance(enemy, player);
+        if (aimDist < 360 && enemy.fireCooldown <= 0) {
+          shoot(enemy, player, 'enemy');
+          enemy.fireCooldown = 32;
+        }
+      }
+
+      function updateBullets() {
+        for (let i = bullets.length - 1; i >= 0; i--) {
+          const bullet = bullets[i];
+          bullet.x += bullet.vx;
+          bullet.y += bullet.vy;
+          bullet.ttl -= 1;
+
+          if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height || bullet.ttl <= 0) {
+            bullets.splice(i, 1);
+            continue;
+          }
+
+          let hitWall = false;
+          for (const wall of walls) {
+            if (bullet.x > wall.x && bullet.x < wall.x + wall.w && bullet.y > wall.y && bullet.y < wall.y + wall.h) {
+              hitWall = true;
+              break;
+            }
+          }
+
+          if (hitWall) {
+            bullets.splice(i, 1);
+            continue;
+          }
+
+          const target = bullet.owner === 'player' ? enemy : player;
+          const hit = Math.hypot(bullet.x - target.x, bullet.y - target.y) < target.r + bullet.r;
+
+          if (hit) {
+            target.health -= bullet.owner === 'player' ? player.damage : enemy.damage;
+            bullets.splice(i, 1);
+
+            if (target.health <= 0) {
+              state.gameOver = true;
+              state.winner = bullet.owner === 'player' ? 'YOU WIN' : 'BOT WINS';
+              centerMessage.textContent = `${state.winner} • PRESS R TO RESET`;
+            }
+          }
+        }
+      }
+
+      function drawArena() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#0a1428';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.strokeStyle = 'rgba(148,163,184,0.12)';
+        ctx.lineWidth = 1;
+        for (let x = 0; x <= canvas.width; x += 40) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, canvas.height);
+          ctx.stroke();
+        }
+        for (let y = 0; y <= canvas.height; y += 40) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(canvas.width, y);
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = '#1f2937';
+        for (const wall of walls) {
+          ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+          ctx.strokeStyle = 'rgba(103,232,249,0.25)';
+          ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+        }
+
+        drawEntity(player, '#38bdf8');
+        drawEntity(enemy, '#f87171');
+
+        for (const bullet of bullets) {
+          ctx.beginPath();
+          ctx.fillStyle = bullet.owner === 'player' ? '#facc15' : '#fda4af';
+          ctx.arc(bullet.x, bullet.y, bullet.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        drawReticle();
+      }
+
+      function drawEntity(entity, color) {
+        ctx.save();
+        ctx.translate(entity.x, entity.y);
+        ctx.rotate(entity.angle);
+
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(0, 0, entity.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#dbeafe';
+        ctx.fillRect(8, -2, 18, 4);
+        ctx.restore();
+      }
+
+      function drawReticle() {
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.beginPath();
+        ctx.arc(state.mouseX, state.mouseY, 10, 0, Math.PI * 2);
+        ctx.moveTo(state.mouseX - 14, state.mouseY);
+        ctx.lineTo(state.mouseX + 14, state.mouseY);
+        ctx.moveTo(state.mouseX, state.mouseY - 14);
+        ctx.lineTo(state.mouseX, state.mouseY + 14);
+        ctx.stroke();
+      }
+
+      function updateHud() {
+        playerBar.style.width = `${clamp(player.health, 0, 100)}%`;
+        enemyBar.style.width = `${clamp(enemy.health, 0, 100)}%`;
+        buildIndicator.textContent = state.buildMode ? 'BUILD MODE ON' : 'BUILD MODE OFF';
+      }
+
+      function tick(timestamp) {
+        const delta = timestamp - state.lastTime || 16;
+        state.lastTime = timestamp;
+
+        if (!state.gameOver) {
+          updatePlayer();
+          updateEnemy();
+          updateBullets();
+        }
+
+        updateHud();
+        drawArena();
+        requestAnimationFrame(tick);
+      }
+
+      document.addEventListener('keydown', (event) => {
+        const key = event.key.toLowerCase();
+        state.keys[key] = true;
+
+        if (key === 'q') {
+          state.buildMode = !state.buildMode;
+          centerMessage.textContent = state.buildMode ? 'BUILD MODE ACTIVE' : 'CLICK TO SHOOT • Q = BUILD • R = RESET';
+        }
+
+        if (key === 'r') {
+          resetGame();
+        }
+      });
+
+      document.addEventListener('keyup', (event) => {
+        const key = event.key.toLowerCase();
+        state.keys[key] = false;
+      });
+
+      canvas.addEventListener('mousemove', (event) => {
+        const rect = canvas.getBoundingClientRect();
+        state.mouseX = ((event.clientX - rect.left) / rect.width) * canvas.width;
+        state.mouseY = ((event.clientY - rect.top) / rect.height) * canvas.height;
+      });
+
+      canvas.addEventListener('mousedown', (event) => {
+        if (state.gameOver) return;
+
+        if (state.buildMode) {
+          placeWall();
+          return;
+        }
+
+        if (player.fireCooldown <= 0) {
+          shoot(player, { x: state.mouseX, y: state.mouseY }, 'player');
+          player.fireCooldown = 220;
+        }
+      });
+
+      resetGame();
+      requestAnimationFrame(tick);
+    </script>
+  </body>
+</html>
